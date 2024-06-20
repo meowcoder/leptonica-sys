@@ -1,0 +1,3 @@
+[submodule "leptonica"]
+	path = leptonica
+	url = https://github.com/DanBloomberg/leptonica/

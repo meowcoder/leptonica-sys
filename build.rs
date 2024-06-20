@@ -7,6 +7,33 @@ use vcpkg;
 
 // const MINIMUM_LEPT_VERSION: &str = "1.80.0";
 
+fn compile_leptonica() -> Option<String> {
+    let dst = cmake::Config::new("leptonica")
+        .define("CMAKE_BUILD_TYPE", "Release")
+        .define("SW_BUILD", "OFF")
+        .define("ENABLE_ZLIB", "OFF")
+        .define("ENABLE_PNG", "OFF")
+        .define("ENABLE_GIF", "OFF")
+        .define("ENABLE_JPEG", "OFF")
+        .define("ENABLE_TIFF", "OFF")
+        .define("ENABLE_WEBP", "OFF")
+        .define("ENABLE_OPENJPEG", "OFF")
+        .build();
+
+    let pkg_config_path = dst.join("lib/pkgconfig");
+    let _ = std::fs::rename(pkg_config_path.join("lept_Release.pc"), pkg_config_path.join("lept.pc"));
+    std::env::set_var("PKG_CONFIG_PATH", &pkg_config_path);
+
+    let pk = pkg_config::Config::new().probe("lept").unwrap();
+    let _ = std::fs::hard_link(dst.join(format!("lib/lib{}.a", pk.libs[0])), dst.join("lib/libleptonica.a"));
+
+    println!("cargo:root={}", dst.display());
+    println!("cargo:rustc-link-search=native={}/lib", dst.display());
+    println!("cargo:rustc-link-lib=static=leptonica");
+
+    Some(dst.join("include").display().to_string())
+}
+
 #[cfg(windows)]
 fn find_leptonica_system_lib() -> Option<String> {
     println!("cargo:rerun-if-env-changed=LEPTONICA_INCLUDE_PATH");
@@ -76,7 +103,13 @@ fn find_leptonica_system_lib() -> Option<String> {
 }
 
 fn main() {
-    let clang_extra_include = find_leptonica_system_lib();
+    println!("cargo:rerun-if-env-changed=LEPTONICA_BUNDLE");
+
+    let clang_extra_include = if std::env::var_os("LEPTONICA_BUNDLE").is_some() {
+        compile_leptonica()
+    } else {
+        find_leptonica_system_lib()
+    };
 
     let mut bindings = bindgen::Builder::default().header("wrapper.h");
 
@@ -85,6 +118,13 @@ fn main() {
     }
 
     let bindings = bindings
+        // Remove warnings about improper_ctypes
+        .blocklist_function("strtold")
+        .blocklist_function("qecvt")
+        .blocklist_function("qfcvt")
+        .blocklist_function("qgcvt")
+        .blocklist_function("qecvt_r")
+        .blocklist_function("qfcvt_r")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         .generate()
         .expect("Unable to generate bindings");
